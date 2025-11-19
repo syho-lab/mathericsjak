@@ -1,12 +1,15 @@
+import os
 import logging
+import asyncio
+import requests
+from datetime import datetime
+from flask import Flask
+from threading import Thread
+
 import sympy as sp
-from sympy import pretty, symbols, solve, integrate, diff, limit, series, simplify
+from sympy import pretty, symbols, solve, integrate, diff, limit, simplify
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes
-import re
-import json
-import asyncio
-from datetime import datetime
 
 # Настройка логирования
 logging.basicConfig(
@@ -15,8 +18,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Глобальные переменные для хранения истории
+# Глобальные переменные
 USER_HISTORY = {}
+app = Flask(__name__)
 
 class MathBot:
     def __init__(self, token):
@@ -47,7 +51,7 @@ class MathBot:
 🤖 Я — продвинутый математический бот, который поможет решить *любые* математические примеры:
 
 🔢 *Арифметические операции*
-📐 *Алгебраические выражения*
+📐 *Алгебраические выражения* 
 📈 *Производные и интегралы*
 ∞ *Пределы и ряды*
 ⚡ *Сложные математические задачи*
@@ -68,7 +72,7 @@ class MathBot:
 
 *Поддерживаемые операции:*
 • `2 + 3 * 4` - Арифметические операции
-• `x**2 + 3*x - 4` - Алгебраические уравнения
+• `x**2 + 3*x - 4` - Алгебраические уравнения  
 • `diff(x**2, x)` - Производные
 • `integrate(x**2, x)` - Интегралы
 • `limit(sin(x)/x, x, 0)` - Пределы
@@ -77,7 +81,7 @@ class MathBot:
 *Примеры запросов:*
 • `реши 2*(3+5)/4`
 • `производная x^2 + 3x`
-• `интеграл x^2 dx`
+• `интеграл x^2 dx` 
 • `предел sin(x)/x при x->0`
 
 🎨 *Особенности:*
@@ -105,7 +109,7 @@ class MathBot:
             'посчитай': '',
             'вычисли': '',
             'производная': 'diff',
-            'интеграл': 'integrate',
+            'интеграл': 'integrate', 
             'предел': 'limit',
             'упростить': 'simplify',
             'уравнение': 'solve'
@@ -158,7 +162,7 @@ class MathBot:
             x, y, z = symbols('x y z')
             
             # Определение типа выражения и решение
-            if 'diff' in clean_expr or 'производная' in expression.lower():
+            if 'diff' in clean_expr:
                 # Производная
                 expr = clean_expr.replace('diff(', '').replace(')', '')
                 parts = expr.split(',')
@@ -171,7 +175,7 @@ class MathBot:
                     steps.append(f"🎯 *Производная:* `{derivative}`")
                     result = derivative
                     
-            elif 'integrate' in clean_expr or 'интеграл' in expression.lower():
+            elif 'integrate' in clean_expr:
                 # Интеграл
                 expr = clean_expr.replace('integrate(', '').replace(')', '')
                 parts = expr.split(',')
@@ -184,7 +188,7 @@ class MathBot:
                     steps.append(f"🎯 *Интеграл:* `{integral}`")
                     result = integral
                     
-            elif 'limit' in clean_expr or 'предел' in expression.lower():
+            elif 'limit' in clean_expr:
                 # Предел
                 expr = clean_expr.replace('limit(', '').replace(')', '')
                 parts = expr.split(',')
@@ -237,9 +241,8 @@ class MathBot:
                 "steps": [f"❌ *Ошибка при решении:* `{str(e)}`"]
             }
     
-    def format_result(self, result_data: dict, expression: str) -> str:
+    def format_result(self, result_data: dict, expression: str, user_id: int) -> str:
         """Форматирование результата с красивым оформлением"""
-        user_id = "current_user"
         if user_id not in USER_HISTORY:
             USER_HISTORY[user_id] = []
         
@@ -275,6 +278,7 @@ class MathBot:
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработка текстовых сообщений"""
         user_message = update.message.text
+        user_id = update.effective_user.id
         
         # Показываем что бот печатает
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
@@ -282,7 +286,7 @@ class MathBot:
         
         # Решаем выражение
         result_data = self.solve_expression(user_message)
-        response_text = self.format_result(result_data, user_message)
+        response_text = self.format_result(result_data, user_message, user_id)
         
         # Создаем клавиатуру с кнопками
         keyboard = [
@@ -306,13 +310,15 @@ class MathBot:
         user_id = query.from_user.id
         
         if query.data == "solve_example":
+            keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")]]
             await query.edit_message_text(
                 "📝 *Отправьте математическое выражение для решения*\n\n"
                 "Например:\n"
                 "• `2 + 3 * 4`\n"
-                "• `x**2 + 3*x - 4`\n"
+                "• `x**2 + 3*x - 4`\n" 
                 "• `diff(x**2, x)`\n\n"
                 "Я решу его поэтапно с подробными объяснениями! 🎯",
+                reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode='Markdown'
             )
             
@@ -323,7 +329,7 @@ class MathBot:
 *Поддерживаемые операции:*
 • `2 + 3 * 4` - Арифметические операции
 • `x**2 + 3*x - 4` - Алгебраические уравнения
-• `diff(x**2, x)` - Производные
+• `diff(x**2, x)` - Производные  
 • `integrate(x**2, x)` - Интегралы
 • `limit(sin(x)/x, x, 0)` - Пределы
 
@@ -346,7 +352,7 @@ class MathBot:
                 history_text = "📚 *История ваших решений:*\n\n"
                 for i, item in enumerate(reversed(USER_HISTORY[user_id][-5:]), 1):
                     history_text += f"{i}. `{item['expression']}`\n"
-                    history_text += f"   Результат: `{item['result']}`\n\n"
+                    history_text += f"   Результат: `{item['result'][:50]}{'...' if len(item['result']) > 50 else ''}`\n\n"
             else:
                 history_text = "📚 *История решений пуста*\n\nРешите несколько примеров, и они появятся здесь!"
             
@@ -369,19 +375,63 @@ class MathBot:
                 parse_mode='Markdown'
             )
     
-    def run(self):
+    def run_bot(self):
         """Запуск бота"""
-        logger.info("Бот запущен!")
+        logger.info("🤖 Бот запущен!")
         self.app.run_polling()
 
-# Создание и запуск бота
-if __name__ == "__main__":
-    import os
+# Flask приложение для Render
+@app.route('/')
+def home():
+    return "✅ Math Bot is running!"
+
+@app.route('/health')
+def health():
+    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
+@app.route('/ping')
+def ping():
+    """Эндпоинт для пинга"""
+    logger.info(f"🏓 Пинг получен - {datetime.now()}")
+    return {"status": "pong", "timestamp": datetime.now().isoformat()}
+
+def start_flask():
+    """Запуск Flask приложения"""
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
+
+def ping_self():
+    """Функция для самопинга (запускается в отдельном потоке)"""
+    import time
+    while True:
+        try:
+            # Получаем URL приложения (на Render он доступен по своему домену)
+            app_url = os.environ.get('RENDER_EXTERNAL_URL', 'http://localhost:5000')
+            response = requests.get(f"{app_url}/ping", timeout=10)
+            logger.info(f"🔔 Самопинг: {response.status_code} - {datetime.now()}")
+        except Exception as e:
+            logger.error(f"❌ Ошибка самопинга: {e}")
+        time.sleep(300)  # Пинг каждые 5 минут
+
+if __name__ == '__main__':
     BOT_TOKEN = os.getenv("BOT_TOKEN")
     
     if not BOT_TOKEN:
-        logger.error("BOT_TOKEN не установлен!")
+        logger.error("❌ BOT_TOKEN не установлен!")
         exit(1)
     
+    # Создаем и запускаем бота
     bot = MathBot(BOT_TOKEN)
-    bot.run()
+    
+    # Запускаем Flask в отдельном потоке
+    flask_thread = Thread(target=start_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
+    
+    # Запускаем самопинг в отдельном потоке
+    ping_thread = Thread(target=ping_self)
+    ping_thread.daemon = True
+    ping_thread.start()
+    
+    # Запускаем бота (блокирующий вызов)
+    bot.run_bot()
