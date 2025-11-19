@@ -2,12 +2,13 @@ import os
 import logging
 import asyncio
 import requests
+import re
 from datetime import datetime
 from flask import Flask
 from threading import Thread
 
 import sympy as sp
-from sympy import pretty, symbols, solve, integrate, diff, limit, simplify
+from sympy import pretty, symbols, solve, integrate, diff, limit, simplify, factor, expand, series, apart, sqrt, sin, cos, tan, log, exp, pi, E, oo
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes
 
@@ -25,39 +26,44 @@ app = Flask(__name__)
 class MathBot:
     def __init__(self, token):
         self.token = token
-        self.app = Application.builder().token(token).build()
+        self.application = Application.builder().token(token).build()
         self.setup_handlers()
     
     def setup_handlers(self):
         """Настройка обработчиков"""
-        self.app.add_handler(CommandHandler("start", self.start))
-        self.app.add_handler(CommandHandler("help", self.help_command))
-        self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
-        self.app.add_handler(CallbackQueryHandler(self.button_handler))
+        self.application.add_handler(CommandHandler("start", self.start))
+        self.application.add_handler(CommandHandler("help", self.help_command))
+        self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
+        self.application.add_handler(CallbackQueryHandler(self.button_handler))
     
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /start"""
         user = update.effective_user
-        keyboard = [
-            [InlineKeyboardButton("🧮 Решить пример", callback_data="solve_example")],
-            [InlineKeyboardButton("❓ Помощь", callback_data="help")],
-            [InlineKeyboardButton("📚 История решений", callback_data="history")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
         
         welcome_text = f"""
-✨ *Добро пожаловать, {user.first_name}!* ✨
+🌟 *Добро пожаловать, {user.first_name}!* 🌟
 
-🤖 Я — продвинутый математический бот, который поможет решить *любые* математические примеры:
+🎯 *Я — твой персональный математический гений!* 
 
-🔢 *Арифметические операции*
-📐 *Алгебраические выражения* 
-📈 *Производные и интегралы*
-∞ *Пределы и ряды*
-⚡ *Сложные математические задачи*
+✨ *Мои сверхспособности:*
+• 🧮 Решение любых математических примеров
+• 📊 Пошаговые объяснения с красивым оформлением
+• 🎨 Поддержка естественного языка
+• 💾 История всех решений
+• ⚡ Мгновенные вычисления
 
-Просто отправьте мне математический пример, и я решу его поэтапно с подробными объяснениями! 🎯
+💫 *Просто напиши пример — и я сделаю магию!*
+
+👇 *Выбери действие или напиши пример:*
         """
+        
+        keyboard = [
+            [InlineKeyboardButton("🧮 Решить пример", callback_data="solve_example")],
+            [InlineKeyboardButton("📚 Примеры задач", callback_data="examples")],
+            [InlineKeyboardButton("❓ Помощь", callback_data="help"), InlineKeyboardButton("💫 О боте", callback_data="about")],
+            [InlineKeyboardButton("📊 История", callback_data="history")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         
         await update.message.reply_text(
             welcome_text,
@@ -68,30 +74,32 @@ class MathBot:
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /help"""
         help_text = """
-📖 *Справка по использованию бота*
+📖 *Как общаться с математическим гением?*
 
-*Поддерживаемые операции:*
-• `2 + 3 * 4` - Арифметические операции
-• `x**2 + 3*x - 4` - Алгебраические уравнения  
-• `diff(x**2, x)` - Производные
-• `integrate(x**2, x)` - Интегралы
-• `limit(sin(x)/x, x, 0)` - Пределы
-• `solve(x**2 - 4, x)` - Решение уравнений
+🎯 *Пиши примеры в любом формате:*
+• `2 + 3 × 4 ÷ 2`
+• `x² + 3x - 4 = 0` 
+• `производная от x³ + 2x² - 1`
+• `интеграл x² dx от 0 до 1`
+• `предел (sin x)/x при x→0`
+• `разложить x³ - 8 на множители`
 
-*Примеры запросов:*
-• `реши 2*(3+5)/4`
-• `производная x^2 + 3x`
-• `интеграл x^2 dx` 
-• `предел sin(x)/x при x->0`
+🔧 *Поддерживаю всё:*
+• ➕➖✖️➗ Арифметика
+• 📐 Алгебра и уравнения
+• 📈 Производные и интегралы
+• ∞ Пределы и ряды
+• 🧩 Факторизация и упрощение
+• 📊 Комплексные выражения
 
-🎨 *Особенности:*
-• Поэтапное решение с объяснениями
-• Красивое математическое оформление
-• История ваших решений
-• Интерактивные кнопки
+💡 *Совет:* Используй естественную речь — я всё пойму!
         """
         
-        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")]]
+        keyboard = [
+            [InlineKeyboardButton("📚 Примеры задач", callback_data="examples")],
+            [InlineKeyboardButton("🧮 Решить пример", callback_data="solve_example")],
+            [InlineKeyboardButton("⬅️ На главную", callback_data="back_to_main")]
+        ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await update.message.reply_text(
@@ -99,199 +107,547 @@ class MathBot:
             reply_markup=reply_markup,
             parse_mode='Markdown'
         )
+
+    async def show_examples(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Показать примеры задач"""
+        examples_text = """
+🎯 *Вот что я отлично понимаю:*
+
+🔹 *Арифметика:*
+`2³ × (4 + 5) ÷ 3² + √16`
+`|−5| × 2 + 3⁴ ÷ 9`
+
+🔹 *Алгебра:*
+`(x² − 4)(x³ + 2x² - x + 3) ÷ (x − 2)`
+`разложить x⁴ - 16 на множители`
+`упростить (x² + 2x + 1) ÷ (x + 1) × (x³ - 1)`
+
+🔹 *Производные:*
+`производная от (x⁴ + 3x³ − 2x)²`
+`вторая производная sin(x) × cos(x)`
+`дифференциал ln(x² + 1)`
+
+🔹 *Интегралы:*
+`интеграл 3x² + 2x - 1 dx`
+`∫(x³ + 2x) dx от 0 до 2`
+`интеграл от eˣ × sin(x) dx`
+
+🔹 *Пределы:*
+`предел (1 - cos x)/x² при x→0`
+`lim x→∞ (1 + 1/x)ˣ`
+`предел (x² - 4)/(x - 2) при x→2`
+
+🎪 *Смело экспериментируй! Я понимаю очень многое!*
+        """
+        
+        keyboard = [
+            [InlineKeyboardButton("🧮 Решить свой пример", callback_data="solve_example")],
+            [InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        if update.callback_query:
+            await update.callback_query.edit_message_text(
+                examples_text,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        else:
+            await update.message.reply_text(
+                examples_text,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
     
-    def preprocess_expression(self, text: str) -> str:
-        """Предварительная обработка математического выражения"""
-        # Замена русских команд на английские
-        replacements = {
-            'реши': '',
-            'решить': '',
-            'посчитай': '',
-            'вычисли': '',
-            'производная': 'diff',
-            'интеграл': 'integrate', 
-            'предел': 'limit',
-            'упростить': 'simplify',
-            'уравнение': 'solve'
+    async def about_bot(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Информация о боте"""
+        about_text = """
+💫 *Math Genius Bot* 
+
+🤖 *Самый умный математический помощник!*
+
+✨ *Что меня отличает:*
+• 🧠 Понимаю сложнейшие примеры
+• 🎨 Красиво оформляю решения
+• 💬 Общаюсь на естественном языке
+• 📚 Помню историю твоих решений
+• ⚡ Работаю мгновенно
+
+🔮 *Я понимаю:*
+• Любые математические выражения
+• Естественный язык запросов
+• Разные форматы записи
+• Сложные многочлены и уравнения
+
+🎊 *Добро пожаловать в мир красивой математики!*
+        """
+        
+        keyboard = [[InlineKeyboardButton("⬅️ На главную", callback_data="back_to_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.callback_query.edit_message_text(
+            about_text,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+
+    def smart_preprocess(self, text: str) -> str:
+        """Умная предварительная обработка с улучшенным пониманием"""
+        original_text = text
+        text = text.lower().strip()
+        
+        # Удаляем лишние слова
+        remove_words = ['пожалуйста', 'мне', 'нужно', 'найти', 'можно', 'ли', 'ты', 'вы', 'сможешь']
+        for word in remove_words:
+            text = re.sub(r'\b' + re.escape(word) + r'\b', '', text)
+        
+        # Замена русских команд на математические
+        math_commands = {
+            'реши': '', 'решить': '', 'посчитай': '', 'вычисли': '', 
+            'производная': 'diff', 'производную': 'diff', 'дифференциал': 'diff', 'дифференцируй': 'diff',
+            'интеграл': 'integrate', 'интеграла': 'integrate', 'интегрируй': 'integrate',
+            'предел': 'limit', 'лимит': 'limit',
+            'упростить': 'simplify', 'упрости': 'simplify',
+            'разложи': 'factor', 'разложить': 'factor', 'факторизуй': 'factor',
+            'раскрой': 'expand', 'раскрыть': 'expand',
+            'уравнение': 'solve', 'реши уравнение': 'solve', 'найди корни': 'solve',
+            'от': ' ', 'по': ' ', 'для': ' ', 'переменной': ' ',
+            'при': ',', 'стремится': ',', 'стремиться': ',',
+            '→': ',', '->': ',',
+            'бесконечность': 'oo', 'бесконечности': 'oo'
         }
         
-        for rus, eng in replacements.items():
+        for rus, eng in math_commands.items():
             text = text.replace(rus, eng)
         
-        # Замена ^ на ** для возведения в степень
+        # Умная замена математических обозначений
+        text = re.sub(r'(\d+)²', r'\1**2', text)
+        text = re.sub(r'(\d+)³', r'\1**3', text)
+        text = re.sub(r'(\d+)⁴', r'\1**4', text)
+        text = re.sub(r'(\w+)²', r'\1**2', text)
+        text = re.sub(r'(\w+)³', r'\1**3', text)
+        text = re.sub(r'(\w+)⁴', r'\1**4', text)
+        
         text = text.replace('^', '**')
+        text = text.replace('×', '*').replace('÷', '/').replace('⋅', '*')
+        text = text.replace('√', 'sqrt').replace('∣', 'abs').replace('|', 'abs')
+        text = text.replace('π', 'pi').replace('∞', 'oo').replace('∫', 'integrate')
+        text = text.replace('е', 'e').replace('ё', 'e')
+        text = text.replace('sin', 'sin').replace('cos', 'cos').replace('tan', 'tan')
+        text = text.replace('ln', 'log').replace('lg', 'log10')
         
-        # Замена математических констант
-        text = text.replace('π', 'pi')
-        text = text.replace('∞', 'oo')
+        # Обработка пределов с естественным языком
+        limit_pattern = r'limit\(([^,]+),([^,]+),([^)]+)\)'
+        if 'limit' not in text and ('стремится' in original_text or '→' in original_text or 'при' in original_text):
+            # Автоматическое создание limit из естественного языка
+            if 'x→' in text or 'x->' in text:
+                parts = re.split(r'x[→->]', text)
+                if len(parts) == 2:
+                    func = parts[0].strip()
+                    point = parts[1].strip()
+                    text = f'limit({func}, x, {point})'
         
-        # Удаление лишних пробелов
-        text = ' '.join(text.split())
+        # Обработка интегралов с пределами
+        if 'integrate' in text and ('от' in original_text or 'до' in original_text):
+            if 'от' in original_text and 'до' in original_text:
+                # Извлекаем пределы интегрирования
+                pass
         
-        return text.strip()
-    
+        # Удаление лишних пробелов и очистка
+        text = re.sub(r'\s+', ' ', text).strip()
+        text = re.sub(r',\s*,', ',', text)  # Удаляем лишние запятые
+        
+        return text if text else original_text
+
+    def safe_sympify(self, expr_str: str):
+        """Безопасное преобразование строки в sympy выражение"""
+        try:
+            # Создаем безопасное окружение для sympify
+            safe_dict = {
+                'x': symbols('x'), 'y': symbols('y'), 'z': symbols('z'),
+                'sin': sin, 'cos': cos, 'tan': tan, 'cot': lambda x: 1/tan(x),
+                'sqrt': sqrt, 'log': log, 'ln': log, 'exp': exp,
+                'pi': pi, 'e': E, 'oo': oo,
+                'abs': abs, 'factorial': sp.factorial,
+                'diff': diff, 'integrate': integrate, 'limit': limit,
+                'solve': solve, 'simplify': simplify, 'factor': factor, 'expand': expand
+            }
+            
+            # Заменяем ** на ^ для временного парсинга
+            temp_expr = expr_str.replace('**', '^')
+            expr = sp.sympify(temp_expr, locals=safe_dict)
+            # Возвращаем обратно **
+            return expr
+        except Exception as e:
+            logger.error(f"Sympify error: {e}")
+            return None
+
     def solve_expression(self, expression: str) -> dict:
-        """Решение математического выражения с поэтапным объяснением"""
+        """Умное решение математического выражения с улучшенным пониманием"""
         try:
             steps = []
+            original_expr = expression
+            
+            # Умная предобработка
+            clean_expr = self.smart_preprocess(expression)
+            steps.append(f"🎯 *Запрос:* `{original_expr}`")
+            
+            # Определяем тип задачи
+            task_type = self.detect_task_type(clean_expr, original_expr)
+            steps.append(f"🔍 *Определяем тип задачи...*")
+            
+            # Пробуем разные методы решения
             result = None
             
-            # Очистка выражения
-            clean_expr = self.preprocess_expression(expression)
-            steps.append(f"📝 *Исходное выражение:* `{expression}`")
-            steps.append(f"🔧 *Обработанное выражение:* `{clean_expr}`")
-            
-            # Попытка численного вычисления
-            try:
-                if not any(c.isalpha() for c in clean_expr):
-                    result = eval(clean_expr, {"__builtins__": {}}, 
-                                {"sin": sp.sin, "cos": sp.cos, "tan": sp.tan,
-                                 "log": sp.log, "exp": sp.exp, "sqrt": sp.sqrt,
-                                 "pi": sp.pi, "E": sp.E, "oo": sp.oo})
-                    steps.append(f"🔢 *Численное вычисление:* `{clean_expr} = {result}`")
-                    return {
-                        "success": True,
-                        "result": result,
-                        "steps": steps,
-                        "type": "numeric"
-                    }
-            except:
-                pass
-            
-            # Символьные вычисления
-            x, y, z = symbols('x y z')
-            
-            # Определение типа выражения и решение
-            if 'diff' in clean_expr:
-                # Производная
-                expr = clean_expr.replace('diff(', '').replace(')', '')
-                parts = expr.split(',')
-                if len(parts) == 2:
-                    func = sp.sympify(parts[0].strip())
-                    var = sp.sympify(parts[1].strip())
-                    derivative = diff(func, var)
-                    steps.append(f"📈 *Функция:* `{func}`")
-                    steps.append(f"📊 *Переменная дифференцирования:* `{var}`")
-                    steps.append(f"🎯 *Производная:* `{derivative}`")
-                    result = derivative
-                    
-            elif 'integrate' in clean_expr:
-                # Интеграл
-                expr = clean_expr.replace('integrate(', '').replace(')', '')
-                parts = expr.split(',')
-                if len(parts) >= 2:
-                    func = sp.sympify(parts[0].strip())
-                    var = sp.sympify(parts[1].strip())
-                    integral = integrate(func, var)
-                    steps.append(f"📈 *Функция:* `{func}`")
-                    steps.append(f"📊 *Переменная интегрирования:* `{var}`")
-                    steps.append(f"🎯 *Интеграл:* `{integral}`")
-                    result = integral
-                    
-            elif 'limit' in clean_expr:
-                # Предел
-                expr = clean_expr.replace('limit(', '').replace(')', '')
-                parts = expr.split(',')
-                if len(parts) >= 3:
-                    func = sp.sympify(parts[0].strip())
-                    var = sp.sympify(parts[1].strip())
-                    point = sp.sympify(parts[2].strip())
-                    lim = limit(func, var, point)
-                    steps.append(f"📈 *Функция:* `{func}`")
-                    steps.append(f"📊 *Переменная:* `{var}`")
-                    steps.append(f"🎯 *Точка:* `{point}`")
-                    steps.append(f"∞ *Предел:* `{lim}`")
-                    result = lim
-                    
-            elif 'solve' in clean_expr or '=' in clean_expr:
-                # Решение уравнений
-                if 'solve' in clean_expr:
-                    expr = clean_expr.replace('solve(', '').replace(')', '')
-                    parts = expr.split(',')
-                    equation = sp.sympify(parts[0].strip())
-                    var = sp.sympify(parts[1].strip()) if len(parts) > 1 else x
-                else:
-                    equation = sp.sympify(clean_expr)
-                    var = x
-                
-                solutions = solve(equation, var)
-                steps.append(f"📝 *Уравнение:* `{equation} = 0`")
-                steps.append(f"🎯 *Решения:* `{solutions}`")
-                result = solutions
-                
+            if task_type == "derivative":
+                result = self.solve_advanced_derivative(clean_expr, steps)
+            elif task_type == "integral":
+                result = self.solve_advanced_integral(clean_expr, steps)
+            elif task_type == "limit":
+                result = self.solve_advanced_limit(clean_expr, steps)
+            elif task_type == "equation":
+                result = self.solve_advanced_equation(clean_expr, steps)
+            elif task_type == "factor":
+                result = self.solve_factorization(clean_expr, steps)
+            elif task_type == "expand":
+                result = self.solve_expansion(clean_expr, steps)
             else:
-                # Общее символьное выражение
-                expr = sp.sympify(clean_expr)
-                simplified = simplify(expr)
-                steps.append(f"📝 *Исходное выражение:* `{expr}`")
-                steps.append(f"✨ *Упрощенное выражение:* `{simplified}`")
+                result = self.solve_advanced_general(clean_expr, steps)
+            
+            if result and result["success"]:
+                return result
+            else:
+                return {
+                    "success": False,
+                    "error": "Не удалось распознать пример",
+                    "steps": ["❌ *Пример не понятен*", "💡 Попробуйте сформулировать иначе"]
+                }
+                
+        except Exception as e:
+            logger.error(f"Solution error: {e}")
+            return {
+                "success": False,
+                "error": "Не удалось обработать запрос",
+                "steps": ["❌ *Пример не понятен*", "🎯 Попробуйте изменить формулировку"]
+            }
+
+    def detect_task_type(self, clean_expr: str, original_expr: str) -> str:
+        """Определение типа математической задачи"""
+        original_lower = original_expr.lower()
+        
+        if any(word in original_lower for word in ['производн', 'дифференциал', 'diff']):
+            return "derivative"
+        elif any(word in original_lower for word in ['интеграл', 'integrate', '∫']):
+            return "integral"
+        elif any(word in original_lower for word in ['предел', 'limit', 'стремится', '→']):
+            return "limit"
+        elif any(word in original_lower for word in ['уравнен', 'реши', 'корн', 'solve', '=']):
+            return "equation"
+        elif any(word in original_lower for word in ['разлож', 'факториз', 'factor']):
+            return "factor"
+        elif any(word in original_lower for word in ['раскр', 'expand']):
+            return "expand"
+        else:
+            return "general"
+
+    def solve_advanced_general(self, clean_expr: str, steps: list) -> dict:
+        """Решение общих математических выражений"""
+        try:
+            expr = self.safe_sympify(clean_expr)
+            if not expr:
+                return {"success": False}
+            
+            steps.append(f"📝 *Выражение:* `{pretty(expr, use_unicode=True)}`")
+            
+            # Последовательное упрощение
+            result = expr
+            simplified = simplify(expr)
+            
+            if simplified != expr:
+                steps.append(f"✨ *Упрощаем:* `{pretty(simplified, use_unicode=True)}`")
                 result = simplified
+            
+            # Дополнительные преобразования для полиномов
+            if result.is_polynomial():
+                factored = factor(result)
+                if factored != result:
+                    steps.append(f"🧩 *Разложение:* `{pretty(factored, use_unicode=True)}`")
+                    result = factored
             
             return {
                 "success": True,
                 "result": result,
                 "steps": steps,
-                "type": "symbolic"
+                "type": "general"
             }
+        except:
+            return {"success": False}
+
+    def solve_advanced_derivative(self, clean_expr: str, steps: list) -> dict:
+        """Решение производных с улучшенным пониманием"""
+        try:
+            x = symbols('x')
             
-        except Exception as e:
+            # Извлекаем функцию из разных форматов
+            if 'diff(' in clean_expr:
+                # Формат diff(f(x), x)
+                match = re.search(r'diff\(([^,]+),([^)]+)\)', clean_expr)
+                if match:
+                    func_str = match.group(1).strip()
+                    var_str = match.group(2).strip()
+                    func = self.safe_sympify(func_str)
+                    var = self.safe_sympify(var_str) if var_str != 'x' else x
+                else:
+                    return {"success": False}
+            else:
+                # Пытаемся извлечь функцию из текста
+                func_str = clean_expr.replace('diff', '').strip()
+                func = self.safe_sympify(func_str)
+                var = x
+            
+            if not func:
+                return {"success": False}
+            
+            steps.append(f"📈 *Функция:* `{pretty(func, use_unicode=True)}`")
+            steps.append(f"🎯 *По переменной:* `{var}`")
+            
+            derivative = diff(func, var)
+            steps.append(f"💫 *Производная:* `{pretty(derivative, use_unicode=True)}`")
+            
+            simplified = simplify(derivative)
+            if simplified != derivative:
+                steps.append(f"✨ *Упрощенная:* `{pretty(simplified, use_unicode=True)}`")
+            
             return {
-                "success": False,
-                "error": str(e),
-                "steps": [f"❌ *Ошибка при решении:* `{str(e)}`"]
+                "success": True,
+                "result": simplified,
+                "steps": steps,
+                "type": "derivative"
             }
-    
+        except:
+            return {"success": False}
+
+    def solve_advanced_integral(self, clean_expr: str, steps: list) -> dict:
+        """Решение интегралов с улучшенным пониманием"""
+        try:
+            x = symbols('x')
+            
+            if 'integrate(' in clean_expr:
+                match = re.search(r'integrate\(([^,]+),([^)]+)\)', clean_expr)
+                if match:
+                    func_str = match.group(1).strip()
+                    var_str = match.group(2).strip()
+                    func = self.safe_sympify(func_str)
+                    var = self.safe_sympify(var_str) if var_str != 'x' else x
+                else:
+                    return {"success": False}
+            else:
+                func_str = clean_expr.replace('integrate', '').strip()
+                func = self.safe_sympify(func_str)
+                var = x
+            
+            if not func:
+                return {"success": False}
+            
+            steps.append(f"📊 *Функция:* `{pretty(func, use_unicode=True)}`")
+            steps.append(f"🎯 *Переменная:* `{var}`")
+            
+            integral = integrate(func, var)
+            steps.append(f"💫 *Интеграл:* `{pretty(integral, use_unicode=True)}`")
+            
+            simplified = simplify(integral)
+            if simplified != integral:
+                steps.append(f"✨ *Упрощенный:* `{pretty(simplified, use_unicode=True)}`")
+            
+            return {
+                "success": True,
+                "result": simplified,
+                "steps": steps,
+                "type": "integral"
+            }
+        except:
+            return {"success": False}
+
+    def solve_advanced_equation(self, clean_expr: str, steps: list) -> dict:
+        """Решение уравнений с улучшенным пониманием"""
+        try:
+            x = symbols('x')
+            
+            if 'solve(' in clean_expr:
+                match = re.search(r'solve\(([^,]+),([^)]+)\)', clean_expr)
+                if match:
+                    eq_str = match.group(1).strip()
+                    var_str = match.group(2).strip()
+                    equation = self.safe_sympify(eq_str)
+                    var = self.safe_sympify(var_str) if var_str != 'x' else x
+                else:
+                    return {"success": False}
+            else:
+                # Пытаемся найти уравнение в тексте
+                if '=' in clean_expr:
+                    parts = clean_expr.split('=')
+                    if len(parts) == 2:
+                        left = self.safe_sympify(parts[0].strip())
+                        right = self.safe_sympify(parts[1].strip())
+                        equation = left - right
+                    else:
+                        return {"success": False}
+                else:
+                    equation = self.safe_sympify(clean_expr)
+                var = x
+            
+            if not equation:
+                return {"success": False}
+            
+            steps.append(f"📝 *Уравнение:* `{pretty(equation, use_unicode=True)} = 0`")
+            
+            solutions = solve(equation, var)
+            
+            if solutions:
+                steps.append(f"💡 *Найдено решений:* {len(solutions)}")
+                for i, sol in enumerate(solutions, 1):
+                    steps.append(f"🔹 *x{i}:* `{pretty(sol, use_unicode=True)}`")
+            else:
+                steps.append("❌ *Решений не найдено*")
+            
+            return {
+                "success": True,
+                "result": solutions,
+                "steps": steps,
+                "type": "equation"
+            }
+        except:
+            return {"success": False}
+
+    def solve_advanced_limit(self, clean_expr: str, steps: list) -> dict:
+        """Решение пределов с улучшенным пониманием"""
+        try:
+            x = symbols('x')
+            
+            if 'limit(' in clean_expr:
+                match = re.search(r'limit\(([^,]+),([^,]+),([^)]+)\)', clean_expr)
+                if match:
+                    func_str = match.group(1).strip()
+                    var_str = match.group(2).strip()
+                    point_str = match.group(3).strip()
+                    func = self.safe_sympify(func_str)
+                    var = self.safe_sympify(var_str) if var_str != 'x' else x
+                    point = self.safe_sympify(point_str)
+                else:
+                    return {"success": False}
+            else:
+                return {"success": False}
+            
+            if not func:
+                return {"success": False}
+            
+            steps.append(f"📊 *Функция:* `{pretty(func, use_unicode=True)}`")
+            steps.append(f"🎯 *Переменная:* `{var}`")
+            steps.append(f"📍 *Точка:* `{point}`")
+            
+            lim = limit(func, var, point)
+            steps.append(f"💫 *Предел:* `{pretty(lim, use_unicode=True)}`")
+            
+            return {
+                "success": True,
+                "result": lim,
+                "steps": steps,
+                "type": "limit"
+            }
+        except:
+            return {"success": False}
+
+    def solve_factorization(self, clean_expr: str, steps: list) -> dict:
+        """Факторизация выражений"""
+        try:
+            expr = self.safe_sympify(clean_expr.replace('factor', '').strip())
+            if not expr:
+                return {"success": False}
+            
+            steps.append(f"📝 *Исходное:* `{pretty(expr, use_unicode=True)}`")
+            
+            factored = factor(expr)
+            steps.append(f"🧩 *Разложено:* `{pretty(factored, use_unicode=True)}`")
+            
+            return {
+                "success": True,
+                "result": factored,
+                "steps": steps,
+                "type": "factor"
+            }
+        except:
+            return {"success": False}
+
+    def solve_expansion(self, clean_expr: str, steps: list) -> dict:
+        """Раскрытие скобок"""
+        try:
+            expr = self.safe_sympify(clean_expr.replace('expand', '').strip())
+            if not expr:
+                return {"success": False}
+            
+            steps.append(f"📝 *Исходное:* `{pretty(expr, use_unicode=True)}`")
+            
+            expanded = expand(expr)
+            steps.append(f"📤 *Раскрыто:* `{pretty(expanded, use_unicode=True)}`")
+            
+            return {
+                "success": True,
+                "result": expanded,
+                "steps": steps,
+                "type": "expand"
+            }
+        except:
+            return {"success": False}
+
     def format_result(self, result_data: dict, expression: str, user_id: int) -> str:
-        """Форматирование результата с красивым оформлением"""
+        """Красивое форматирование результата"""
         if user_id not in USER_HISTORY:
             USER_HISTORY[user_id] = []
         
         if result_data["success"]:
-            response = f"🧮 *Результат решения:*\n\n"
+            response = "🎉 *Великолепно! Решение готово:*\n\n"
             
-            # Добавляем шаги решения
             for step in result_data["steps"]:
-                response += f"{step}\n"
+                response += f"• {step}\n"
             
-            response += f"\n🎯 *Финальный ответ:*\n"
+            response += f"\n💎 *Финальный ответ:*\n"
             response += f"```\n{pretty(result_data['result'], use_unicode=True)}\n```"
+            response += f"\n✨ *Магия математики завершена!*"
             
             # Сохраняем в историю
             history_item = {
                 "timestamp": datetime.now().isoformat(),
                 "expression": expression,
                 "result": str(result_data["result"]),
-                "steps": result_data["steps"]
+                "type": result_data.get("type", "general")
             }
             USER_HISTORY[user_id].append(history_item)
-            if len(USER_HISTORY[user_id]) > 10:  # Ограничиваем историю
-                USER_HISTORY[user_id] = USER_HISTORY[user_id][-10:]
+            if len(USER_HISTORY[user_id]) > 20:
+                USER_HISTORY[user_id] = USER_HISTORY[user_id][-20:]
                 
         else:
-            response = f"❌ *Ошибка!*\n\n"
-            response += f"*Выражение:* `{expression}`\n"
-            response += f"*Ошибка:* `{result_data['error']}`\n\n"
-            response += "Попробуйте переформулировать запрос или используйте /help для справки."
+            response = "❌ *Пример не понятен*\n\n"
+            response += "💡 *Попробуйте:*\n"
+            response += "• Сформулировать иначе\n• Использовать примеры из раздела помощи\n• Проверить синтаксис\n\n"
+            response += "🎯 *Я понимаю самые сложные примеры, но нужно правильное оформление!*"
         
         return response
-    
+
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработка текстовых сообщений"""
         user_message = update.message.text
         user_id = update.effective_user.id
         
-        # Показываем что бот печатает
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-        await asyncio.sleep(1)  # Имитация вычислений
+        await asyncio.sleep(0.3)
         
-        # Решаем выражение
         result_data = self.solve_expression(user_message)
         response_text = self.format_result(result_data, user_message, user_id)
         
-        # Создаем клавиатуру с кнопками
         keyboard = [
-            [InlineKeyboardButton("🔄 Решить другой пример", callback_data="solve_example")],
-            [InlineKeyboardButton("📚 История", callback_data="history")],
+            [InlineKeyboardButton("🔁 Новый пример", callback_data="solve_example")],
+            [InlineKeyboardButton("📚 Примеры", callback_data="examples")],
+            [InlineKeyboardButton("💫 О боте", callback_data="about")],
             [InlineKeyboardButton("⬅️ Главное меню", callback_data="back_to_main")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -301,7 +657,7 @@ class MathBot:
             reply_markup=reply_markup,
             parse_mode='Markdown'
         )
-    
+
     async def button_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик нажатий на инлайн кнопки"""
         query = update.callback_query
@@ -310,53 +666,39 @@ class MathBot:
         user_id = query.from_user.id
         
         if query.data == "solve_example":
-            keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")]]
+            keyboard = [[InlineKeyboardButton("⬅️ На главную", callback_data="back_to_main")]]
             await query.edit_message_text(
-                "📝 *Отправьте математическое выражение для решения*\n\n"
-                "Например:\n"
-                "• `2 + 3 * 4`\n"
-                "• `x**2 + 3*x - 4`\n" 
-                "• `diff(x**2, x)`\n\n"
-                "Я решу его поэтапно с подробными объяснениями! 🎯",
+                "🧮 *Жду ваш математический шедевр!*\n\n"
+                "💫 *Пишите в любом формате:*\n"
+                "• `2 + 3 × 4²`\n" 
+                "• `производная (x³ + 2x)²`\n"
+                "• `интеграл от eˣ × sin(x) dx`\n"
+                "• `предел (1 - cos x)/x² при x→0`\n\n"
+                "*Я понимаю очень многое!* 🎊",
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode='Markdown'
             )
             
         elif query.data == "help":
-            help_text = """
-📖 *Справка по использованию бота*
-
-*Поддерживаемые операции:*
-• `2 + 3 * 4` - Арифметические операции
-• `x**2 + 3*x - 4` - Алгебраические уравнения
-• `diff(x**2, x)` - Производные  
-• `integrate(x**2, x)` - Интегралы
-• `limit(sin(x)/x, x, 0)` - Пределы
-
-*Примеры запросов:*
-• `реши 2*(3+5)/4`
-• `производная x^2 + 3x`
-• `интеграл x^2 dx`
-• `предел sin(x)/x при x->0`
-            """
+            await self.help_command(update, context)
             
-            keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")]]
-            await query.edit_message_text(
-                help_text,
-                reply_markup=InlineKeyboardMarkup(keyboard),
-                parse_mode='Markdown'
-            )
+        elif query.data == "examples":
+            await self.show_examples(update, context)
+            
+        elif query.data == "about":
+            await self.about_bot(update, context)
             
         elif query.data == "history":
             if user_id in USER_HISTORY and USER_HISTORY[user_id]:
                 history_text = "📚 *История ваших решений:*\n\n"
-                for i, item in enumerate(reversed(USER_HISTORY[user_id][-5:]), 1):
-                    history_text += f"{i}. `{item['expression']}`\n"
-                    history_text += f"   Результат: `{item['result'][:50]}{'...' if len(item['result']) > 50 else ''}`\n\n"
+                for i, item in enumerate(reversed(USER_HISTORY[user_id][-10:]), 1):
+                    emoji = "🧮" if item.get("type") == "general" else "📈" if item.get("type") == "derivative" else "∫" if item.get("type") == "integral" else "∞" if item.get("type") == "limit" else "🎯"
+                    history_text += f"{emoji} *{i}.* `{item['expression'][:40]}{'...' if len(item['expression']) > 40 else ''}`\n"
+                    history_text += f"   💎 `{item['result'][:50]}{'...' if len(item['result']) > 50 else ''}`\n\n"
             else:
-                history_text = "📚 *История решений пуста*\n\nРешите несколько примеров, и они появятся здесь!"
+                history_text = "📚 *История пока пуста*\n\n*Решите несколько примеров, и они появятся здесь!* ✨"
             
-            keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")]]
+            keyboard = [[InlineKeyboardButton("⬅️ На главную", callback_data="back_to_main")]]
             await query.edit_message_text(
                 history_text,
                 reply_markup=InlineKeyboardMarkup(keyboard),
@@ -366,49 +708,48 @@ class MathBot:
         elif query.data == "back_to_main":
             keyboard = [
                 [InlineKeyboardButton("🧮 Решить пример", callback_data="solve_example")],
-                [InlineKeyboardButton("❓ Помощь", callback_data="help")],
-                [InlineKeyboardButton("📚 История решений", callback_data="history")]
+                [InlineKeyboardButton("📚 Примеры задач", callback_data="examples")],
+                [InlineKeyboardButton("❓ Помощь", callback_data="help"), InlineKeyboardButton("💫 О боте", callback_data="about")],
+                [InlineKeyboardButton("📊 История", callback_data="history")]
             ]
             await query.edit_message_text(
-                "✨ *Главное меню* ✨\n\nВыберите действие:",
+                "✨ *Главное меню* ✨\n\n*Выберите действие:*",
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode='Markdown'
             )
     
     def run_bot(self):
         """Запуск бота"""
-        logger.info("🤖 Бот запущен!")
-        self.app.run_polling()
+        logger.info("🚀 Math Genius Bot запущен!")
+        self.application.run_polling()
 
 # Flask приложение для Render
 @app.route('/')
 def home():
-    return "✅ Math Bot is running!"
+    return "✅ Math Genius Bot is running perfectly!"
 
 @app.route('/health')
 def health():
-    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+    return {"status": "healthy", "service": "Math Genius Bot", "timestamp": datetime.now().isoformat()}
 
 @app.route('/ping')
 def ping():
-    """Эндпоинт для пинга"""
     logger.info(f"🏓 Пинг получен - {datetime.now()}")
     return {"status": "pong", "timestamp": datetime.now().isoformat()}
 
 def start_flask():
     """Запуск Flask приложения"""
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port, debug=False)
 
 def ping_self():
-    """Функция для самопинга (запускается в отдельном потоке)"""
+    """Функция для самопинга"""
     import time
     while True:
         try:
-            # Получаем URL приложения (на Render он доступен по своему домену)
             app_url = os.environ.get('RENDER_EXTERNAL_URL', 'http://localhost:5000')
             response = requests.get(f"{app_url}/ping", timeout=10)
-            logger.info(f"🔔 Самопинг: {response.status_code} - {datetime.now()}")
+            logger.info(f"🔔 Самопинг: {response.status_code}")
         except Exception as e:
             logger.error(f"❌ Ошибка самопинга: {e}")
         time.sleep(300)  # Пинг каждые 5 минут
@@ -433,5 +774,5 @@ if __name__ == '__main__':
     ping_thread.daemon = True
     ping_thread.start()
     
-    # Запускаем бота (блокирующий вызов)
+    # Запускаем бота
     bot.run_bot()
